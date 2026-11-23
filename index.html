@@ -921,6 +921,12 @@ body.pc .rb-mx th, body.pc .rb-mx td { padding: 7px 5px; }
   <div class="install-bar"><b id="manualTitle">📖 スタッフマニュアル</b><button type="button" class="install-close" onclick="App.closeManual()">閉じる</button></div>
   <iframe id="manualFrame" class="install-frame" title="スタッフマニュアル"></iframe>
 </div>
+<!-- ★📅 カレンダー（2026-11-23 社長依頼）: 見るためのGoogleアカウント（E列）の登録と、拠点カレンダーのURL。
+     z-index は確認の窓（90）より下にする（上だと「登録しますか？」が裏に隠れる） -->
+<div id="calModal" class="install-modal hidden" style="z-index:80" role="dialog" aria-modal="true" aria-label="カレンダー">
+  <div class="install-bar"><b>📅 カレンダー</b><button type="button" class="install-close" onclick="App.closeMyCal()">閉じる</button></div>
+  <div id="calModalBody" style="padding:16px;overflow:auto;flex:1;max-width:640px;width:100%;box-sizing:border-box;margin:0 auto"></div>
+</div>
 <!-- ★PC表示のときだけ、右上のアイコンでログイン情報をポップアップで出す（2026-11-07 社長依頼） -->
 <div id="acctPop" class="acct-pop hidden" role="dialog" aria-label="ログイン情報">
   <div class="acct-pop-title">ログイン情報</div>
@@ -928,6 +934,7 @@ body.pc .rb-mx th, body.pc .rb-mx td { padding: 7px 5px; }
   <!-- ★管理者マニュアル（2026-11-15 社長依頼）: 管理者にだけ出す。管理者のときは下のボタンは「配布スタッフ用マニュアル」になる -->
   <button type="button" class="btn-ghost hidden" id="popAdminManualBtn" style="margin-top:12px" onclick="App.openManual('admin')">📘 管理者マニュアル</button>
   <button type="button" class="btn-ghost" id="popManualBtn" style="margin-top:12px" onclick="App.openManual()">📖 マニュアルを見る</button>
+  <button type="button" class="btn-ghost" id="popCalBtn" style="margin-top:8px" onclick="App.openMyCal()">📅 カレンダーを見る</button>
   <button type="button" class="btn-ghost hidden" id="popInstallBtn" style="margin-top:8px" onclick="App.openInstallGuide()">📲 アプリ化の手順</button>
   <button type="button" class="btn-ghost" style="margin-top:8px" onclick="App.logout()">ログアウト</button>
 </div>
@@ -1146,6 +1153,7 @@ body.pc .rb-mx th, body.pc .rb-mx td { padding: 7px 5px; }
       <div id="accountBody"></div>
       <button type="button" class="btn-primary hidden" id="accAdminManualBtn" style="margin-top:12px" onclick="App.openManual('admin')">📘 管理者マニュアル</button>
       <button class="btn-primary" id="accManualBtn" style="margin-top:12px" onclick="App.openManual()">📖 マニュアルを見る</button>
+      <button type="button" class="btn-ghost" id="accCalBtn" style="margin-top:8px" onclick="App.openMyCal()">📅 カレンダーを見る</button>
       <button type="button" class="btn-ghost hidden" id="accInstallBtn" style="margin-top:8px" onclick="App.openInstallGuide()">📲 アプリ化の手順</button>
       <button class="btn-ghost" style="margin-top:8px" onclick="App.logout()">ログアウト</button>
     </div>
@@ -2300,6 +2308,76 @@ var App = (function() {
       if (!_installPopBound && window.addEventListener) { window.addEventListener('popstate', onInstallPop); _installPopBound = true; }
       if (!_installHist && typeof history !== 'undefined' && history.pushState) { history.pushState({ hiposInstall: 1 }, ''); _installHist = true; }
     } catch (e) { /* 履歴を使えないブラウザでも［閉じる］で閉じられる */ }
+  }
+  // ─── 📅 カレンダー（2026-11-23 社長依頼） ───
+  //   右上のアイコン →［📅 カレンダーを見る］。E列のメールを見せる／空なら本人がGmailを入れて送る（Googleログイン不要）／
+  //   拠点カレンダーのURLをいつでも出す。押したときに初めてサーバに聞く（ふだんの読み込みは増やさない）。
+  var _calHist = false, _calPopBound = false;
+  function onCalPop() { if (_calHist) { _calHist = false; closeMyCal(true); } }
+  function openMyCal() {
+    var m = $('calModal'); if (!m) return;
+    closeAcctPop();
+    m.classList.remove('hidden');
+    try {
+      if (!_calPopBound && window.addEventListener) { window.addEventListener('popstate', onCalPop); _calPopBound = true; }
+      if (!_calHist && typeof history !== 'undefined' && history.pushState) { history.pushState({ hiposCal: 1 }, ''); _calHist = true; }
+    } catch (e) { /* 履歴を使えないブラウザでも［閉じる］で閉じられる */ }
+    loadMyCal();
+  }
+  function closeMyCal(fromBack) {
+    var m = $('calModal'); if (m) m.classList.add('hidden');
+    if (_calHist && fromBack !== true) { _calHist = false; try { history.back(); } catch (e) {} }
+  }
+  function loadMyCal() {
+    var box = $('calModalBody'); if (!box) return;
+    box.innerHTML = '<div class="empty">読み込み中…</div>';
+    api({ action: 'myCalendar' }).then(function(res) {
+      if (!res || !res.ok) { box.innerHTML = '<div class="msg msg-err">' + esc((res && (res.message || res.code)) || '読み込めませんでした') + '</div>'; return; }
+      renderMyCal(res);
+    }).catch(function(e) { box.innerHTML = '<div class="msg msg-err">接続できません: ' + esc(e && e.message) + '</div>'; });
+  }
+  function renderMyCal(r, note) {
+    var box = $('calModalBody'); if (!box) return;
+    var h = note || '';
+    var cals = (r && r.calendars) || [];
+    if (r && r.email) {
+      h += '<div class="card"><h2>カレンダーを見るGoogleアカウント</h2>' +
+        '<div class="case-info" style="overflow-wrap:anywhere"><b>' + esc(r.email) + '</b></div>' +
+        '<div class="footer-note" style="margin-top:6px;white-space:normal">このGoogleアカウントで見られます。変えたいときは管理者に伝えてください。</div></div>';
+      h += '<div class="card"><h2>拠点のカレンダー</h2>';
+      if (!cals.length) h += '<div class="empty">拠点のカレンダーが見つかりません。管理者に伝えてください。</div>';
+      cals.forEach(function(c) {
+        h += '<a class="btn-primary" style="display:block;text-align:center;text-decoration:none;margin-top:8px;box-sizing:border-box" href="' +
+          esc(c.url) + '" target="_blank" rel="noopener">📅 ' + esc(c.base) + 'ポスのカレンダーを開く</a>';
+      });
+      h += '<div class="footer-note" style="margin-top:10px;white-space:normal">上のGoogleアカウントでログインした状態で開いてください。' +
+        '初めて開いたときは「カレンダーを追加しますか？」と出るので［追加］を押すと、Googleカレンダーのアプリにも出ます。見るだけで、予定の追加や変更はできません。</div></div>';
+    } else {
+      h += '<div class="card"><h2>カレンダーを見るGoogleアカウント</h2>' +
+        '<div class="msg msg-info">まだ登録されていません。<br>拠点のカレンダーを見るには、Googleアカウント（Gmail）のメールアドレスを入れて［登録する］を押してください。</div>' +
+        '<input type="email" id="calEmailInput" autocomplete="email" inputmode="email" autocapitalize="off" spellcheck="false" placeholder="例）yamada.taro@gmail.com" style="margin-top:6px">' +
+        '<button type="button" class="btn-primary" id="calEmailBtn" style="margin-top:10px" onclick="App.saveMyCalEmail()">登録する</button>' +
+        '<div class="footer-note" style="margin-top:8px;white-space:normal">登録したあとは、自分では変えられません（変えたいときは管理者へ）。</div></div>';
+    }
+    box.innerHTML = h;
+  }
+  function saveMyCalEmail() {
+    if (state.submitting) return;
+    var inp = $('calEmailInput');
+    var em = String((inp && inp.value) || '').trim().toLowerCase();
+    if (!/^[^\s@,;]+@[^\s@,;]+\.[^\s@,;]+$/.test(em)) { alert('メールアドレスの形が正しくありません。\nもう一度確かめてください。'); return; }
+    uiConfirm('このメールアドレスで登録しますか？\n\n' + em + '\n\n※ 登録したあとは、自分では変えられません。', {}, function() {
+      state.submitting = true;
+      api({ action: 'setMyCalendarEmail', email: em }).then(function(res) {
+        state.submitting = false;
+        if (!res || !res.ok) { alert((res && (res.message || res.code)) || '登録できませんでした'); if (res && res.code === 'E_EMAIL_SET') loadMyCal(); return; }
+        if (state.staff) state.staff.email = res.email;
+        var note = res.shared
+          ? '<div class="msg msg-ok">✅ 登録しました。下のボタンからカレンダーを開けます。</div>'
+          : '<div class="msg msg-ok">✅ 登録しました。カレンダーが見られるようになるまで、少し時間がかかることがあります（遅くとも翌朝）。</div>';
+        renderMyCal(res, note);
+      }).catch(function(e) { state.submitting = false; alert('接続できません: ' + (e && e.message)); });
+    });
   }
   // ─── スタッフマニュアル（2026-11-07 社長依頼） ───
   var _manualHist = false, _manualPopBound = false;
@@ -8957,6 +9035,7 @@ var App = (function() {
     claimSubmit: claimSubmit, onClaimName: onClaimName, unlockAccess: unlockAccess,
     loadPendingRegs: loadPendingRegs, approveReg: approveReg, rejectReg: rejectReg,
     changeStaffPerm: changeStaffPerm, onAcctBtn: onAcctBtn, openManual: openManual, closeManual: closeManual,
+    openMyCal: openMyCal, closeMyCal: closeMyCal, saveMyCalEmail: saveMyCalEmail,
     spTplTab: spTplTab, spTplRender: spTplRender, spTplCopy: spTplCopy,
     stToggleBase: stToggleBase, stAllBases: stAllBases, stSetKind: stSetKind, stSetLink: stSetLink, stOnSearch: stOnSearch, stClear: stClear,
     issueStaffLink: issueStaffLink, revokeStaffLink: revokeStaffLink, addLinkStaff: addLinkStaff, copyStaffLink: copyStaffLink, closeIssuedLink: closeIssuedLink,

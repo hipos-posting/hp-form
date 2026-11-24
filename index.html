@@ -79,7 +79,8 @@
   .acct-pop { display: none; }   /* PC表示のときだけ出す（body.pc .acct-pop） */
   /* ［アプリ化はこちら］（ログイン前の画面だけ）と手順の重ね表示（2026-09-13 社長依頼）。
      ★画面全体の button{width:100%} に負けないよう width:auto。隠す指定は display:flex に負けないよう明示する */
-  .install-btn { flex: 0 0 auto; width: auto; padding: 7px 12px; border-radius: 999px; border: 1.5px solid rgba(255,255,255,.85);
+  /* ★margin-left:auto＝右に寄せてアカウントのアイコンの左隣に置く（2026-11-24 社長指示） */
+  .install-btn { flex: 0 0 auto; margin-left: auto; width: auto; padding: 7px 12px; border-radius: 999px; border: 1.5px solid rgba(255,255,255,.85);
                  background: rgba(255,255,255,.16); color: #fff; font-size: 13px; font-weight: 700; line-height: 1.2;
                  white-space: nowrap; cursor: pointer; -webkit-tap-highlight-color: transparent; }
   .install-btn:active { background: rgba(255,255,255,.34); }
@@ -2346,8 +2347,13 @@ var App = (function() {
         '<div class="footer-note" style="margin-top:6px;white-space:normal">このGoogleアカウントで見られます。変えたいときは管理者に伝えてください。</div></div>';
       h += '<div class="card"><h2>拠点のカレンダー</h2>';
       if (!cals.length) h += '<div class="empty">拠点のカレンダーが見つかりません。管理者に伝えてください。</div>';
-      cals.forEach(function(c) {
+      if (r.allUrl) {   // ★管理者: 全拠点をまとめて追加（2026-11-23 社長依頼）
         h += '<a class="btn-primary" style="display:block;text-align:center;text-decoration:none;margin-top:8px;box-sizing:border-box" href="' +
+          esc(r.allUrl) + '" target="_blank" rel="noopener">📅 全拠点（' + cals.length + 'つ）をまとめて追加</a>' +
+          '<div class="footer-note" style="margin:8px 0 2px;white-space:normal">拠点ごとに開くとき:</div>';
+      }
+      cals.forEach(function(c) {
+        h += '<a class="' + (r.allUrl ? 'btn-ghost' : 'btn-primary') + '" style="display:block;text-align:center;text-decoration:none;margin-top:8px;box-sizing:border-box" href="' +
           esc(c.url) + '" target="_blank" rel="noopener">📅 ' + esc(c.base) + 'ポスのカレンダーを開く</a>';
       });
       h += '<div class="footer-note" style="margin-top:10px;white-space:normal">上のGoogleアカウントでログインした状態で開いてください。' +

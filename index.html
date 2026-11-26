@@ -253,6 +253,7 @@
      ★button.bchk-mis に直接付ける（画面全体の input,select,textarea,button { width:100% } を必ず打ち消す）。 */
   button.bchk-mis { flex: 0 0 auto; width: auto; padding: 4px 10px; font-size: 11px; line-height: 1.2; cursor: pointer;
     color: var(--c-sub); background: transparent; border: 1px dashed var(--c-border); border-radius: 12px; font-weight: 400; }
+  .bchk-loose { font-size: 11px; color: var(--c-sub); font-weight: normal; }
   .bchk-sub.has-mis { display: flex; align-items: center; gap: 6px; }
   .bchk-sub.has-mis .bchk-mis { margin-left: auto; }
   .bchk-misundo { text-align: right; margin-top: 8px; }
@@ -1277,6 +1278,9 @@ body.pc .rb-mx th, body.pc .rb-mx td { padding: 7px 5px; }
         <div class="case-info">町名の横に世帯数を表示します（例「サンプル町 300」）。数字だけを配布エリアと同じ並びで貼ってください。</div>
         <textarea id="regHouseholds" rows="6" placeholder="300&#10;200&#10;150" style="margin-top:6px" oninput="App.updateRegHh()"></textarea>
         <div id="regHhInfo" class="case-info" style="margin-top:4px"></div>
+        <label style="margin-top:12px">市区町村（配布禁止を正しく出すため・空欄でも登録できます）</label>
+        <div class="case-info">配布エリアの市区町村を入れると、<b>その市区町村の配布禁止だけ</b>が出ます（同じ町名の別の市の禁止は出ません）。町名を略して書いたとき（例「嵯峨天龍寺」）も拾います。複数は「・」で区切ります。空欄なら今までどおり町名だけで照合します。</div>
+        <input type="text" id="regCity" autocomplete="off" placeholder="例：宇陀市　／　京都市南区・向日市" style="margin-top:6px">
         <label style="margin-top:12px">選択中のスタッフ（役割）</label>
         <div id="regSelected"><div class="empty">下の「担当を選ぶ」から追加してください</div></div>
       </div>
@@ -1705,6 +1709,13 @@ body.pc .rb-mx th, body.pc .rb-mx td { padding: 7px 5px; }
       <h2>📋 本日の配布禁止リスト（元シート・マイマップ）</h2>
       <div class="case-info">本日、担当に割り当てられている案件に対応するリストだけを表示します。</div>
       <div id="banListLinks"><div class="empty">読み込み中…</div></div>
+    </div>
+
+    <!-- ★2026-11-26 総点検: 元データの住所で、町名が正しく読めないもの（配布エリアと合わず、配布員の画面に出ない恐れ） -->
+    <div class="card hidden" id="banIssueCard">
+      <h2>🔎 配布禁止の元データで確認してほしい住所</h2>
+      <div class="case-info">町名が読めない・区が抜けているなどで、<b>配布エリアの町名と合わず画面に出ない恐れ</b>がある住所です。元のシート（禁止物件マスタ／外部配布禁止マスタ）の「ジオコーディング用住所」を直すと、5分ほどで消えます。</div>
+      <div id="banIssueList"></div>
     </div>
   </div>
 
@@ -3050,7 +3061,10 @@ var App = (function() {
           : '<div class="bchk-btns"><button type="button" class="bchk-one ' + (on ? 'on-avoid' : '') + '" onclick="App.toggleAvoid' + tap + '">' +
               (on ? '☑ 回避した（取り消すにはタップ）' : '☐ 回避したらタップ') + '</button></div>';
         return '<div class="bchk-item' + (on ? ' done' : (mis ? ' mis' : '')) + '">' +
-          '<div class="bchk-addr">' + (b.caution ? '<span class="caution">⚠️要注意 </span>' : '🚫 ') + esc(b.raw) + '</div>' +
+          '<div class="bchk-addr">' + (b.caution ? '<span class="caution">⚠️要注意 </span>' : '🚫 ') + esc(b.raw) +
+            // ★2026-11-26: 範囲禁止（町・団地まるごと）と、略した町名で拾ったもの（市区町村が一致）が分かるように
+            (b.category === 'エリア' ? ' <span class="caution">［範囲禁止］</span>' : '') +
+            (b.looseMatch ? ' <span class="bchk-loose">（配布エリアの町名の一部が一致）</span>' : '') + '</div>' +
           '<div class="bchk-sub' + (chip ? ' has-mis' : '') + '"><span>' + (b.building ? esc(b.building) + ' ・ ' : '') + esc(b.list || '') +
             (b.mapUrl ? '<a href="' + esc(safeUrl(b.mapUrl)) + '" target="_blank" rel="noopener">🗾 地図</a>' : '') + '</span>' +
             chip + '</div>' +
@@ -3273,6 +3287,7 @@ var App = (function() {
       renderBanAdminWarn(res.todaySummary);   // ★未完了の警告（ホームタブが無い管理者にもここで届ける・件数はホームと同一計算）
       renderBanCases(res.cases || []);        // ★案件ごとの回避進捗（過去14日ぶん）
       renderListLinks(res.listLinks || []);
+      renderBanIssues(res.addressIssues);     // ★元データで確認してほしい住所（2026-11-26）
       // ★管理者も配布員と同じ当日のチェック表を持つ（2026-07-27 社長要望）。
       //   範囲＝自分の拠点の当日全案件（＋自分の担当）。0件でも「照合済み」を見せたいのでカードは常に出す。
       state.banToday.admin = res.today || [];
@@ -3332,6 +3347,23 @@ var App = (function() {
         '<div class="bcase-sub">回避 ' + (c.done - mis) + (mis ? '・誤表記 ' + mis : '') + ' / ' + c.total + ' 件　' + mark + '</div>' +
         '</div>';
     }).join('');
+  }
+
+  // ★元データで確認してほしい住所（2026-11-26 総点検）。0件ならカードごと隠す
+  function renderBanIssues(iss) {
+    var card = $('banIssueCard'), box = $('banIssueList');
+    if (!card || !box) return;
+    var items = (iss && iss.items) || [], total = (iss && iss.total) || 0;
+    if (!total) { card.classList.add('hidden'); box.innerHTML = ''; return; }
+    card.classList.remove('hidden');
+    box.innerHTML = '<div class="case-info" style="margin-bottom:6px">' + total + '件' +
+      (total > items.length ? '（先頭の' + items.length + '件を表示）' : '') + (iss.at ? '　' + esc(iss.at) + ' 時点' : '') + '</div>' +
+      items.map(function(x) {
+        return '<div class="bcase"><div class="bcase-h"><b>' + esc(x.addr || '') + '</b></div>' +
+          '<div class="bcase-sub">' + esc(x.list || '') + '　' + esc(String(x.row || '')) + '行目' +
+          (x.town ? '　読み取った町名「' + esc(x.town) + '」' : '') + '</div>' +
+          '<div class="bcase-sub" style="color:var(--c-danger,#c5221f)">' + esc(x.reason || '') + '</div></div>';
+      }).join('');
   }
 
   // ※「未チェック（要確認）」の一覧は廃止（2026-07-27 社長要望・画面をシンプルに）。
@@ -5794,6 +5826,8 @@ var App = (function() {
            '<textarea id="regEditHouseholds" rows="4" oninput="App.updateRegEditHh()">' + esc(ed.householdsText || '') + '</textarea>' +
            (function() { var r = regHhLineInfo(ed.townsText || '', ed.householdsText || '', '保存');
              return '<div id="regEditHhInfo" class="' + r.cls + '" style="margin-top:4px">' + r.html + '</div>'; })() +
+           '<label style="margin-top:8px">市区町村（配布禁止の絞り込み・空欄＝町名だけで照合）</label>' +
+           '<input type="text" id="regEditCity" autocomplete="off" placeholder="例：宇陀市　／　京都市南区・向日市" value="' + esc(ed.cityText || '') + '">' +
            '<label style="margin-top:8px">配布禁止リスト（FunGuys案件／外部案件）</label>' +
            '<div class="banpick">' + regEditBanListHtml() + '</div>' +
            '<label style="margin-top:8px">連絡事項（任意）</label>' +
@@ -5826,18 +5860,19 @@ var App = (function() {
   // 再描画で入力中テキストが消えないよう、textarea の現在値を state に退避する
   function regEditSyncFields() {
     var ed = state.regEdit; if (!ed) return;
-    var l = $('regEditLabel'), t = $('regEditTowns'), n = $('regEditNote'), h = $('regEditHouseholds');
+    var l = $('regEditLabel'), t = $('regEditTowns'), n = $('regEditNote'), h = $('regEditHouseholds'), c = $('regEditCity');
     if (l) ed.label = l.value;
     if (t) ed.townsText = t.value;
     if (n) ed.note = n.value;
     if (h) ed.householdsText = h.value;
+    if (c) ed.cityText = c.value;
   }
 
   // 編集を開始＝現在の内容（ラベル/町/連絡/担当＋役割）をサーバから取得してフォームに反映
   function regStartEdit(i) {
     var r = state.registrations[i]; if (!r) return;
     // area=案件の拠点（担当追加を同じ拠点に絞る）。無ければカレンダーペアのbase。
-    state.regEdit = { i: i, srcEventId: r.srcEventId, srcCal: r.srcCal, area: r.area || r.base || '', loading: true, label: '', townsText: '', note: '', members: [], householdsText: '', banSel: {} };
+    state.regEdit = { i: i, srcEventId: r.srcEventId, srcCal: r.srcCal, area: r.area || r.base || '', loading: true, label: '', townsText: '', note: '', members: [], householdsText: '', cityText: '', banSel: {} };
     $('regListResult').innerHTML = '';
     renderRegistrations();
     api({ action: 'getAssignDetails', srcEventId: r.srcEventId, srcCal: r.srcCal }).then(function(res) {
@@ -5848,6 +5883,7 @@ var App = (function() {
         state.regEdit.label = res.label || '';
         state.regEdit.townsText = (res.towns || []).join('\n');
         state.regEdit.householdsText = (res.households || []).join('\n');
+        state.regEdit.cityText = String(res.city || '');   // 市区町村（2026-11-26）
         // ★保存されている選択（以前のリスト名も）を FunGuys案件／外部案件 に読み替える（2026-11-12）
         state.regEdit.banSel = {}; state.regEdit.banSel[banCatOfSaved(res.banLists || [], res.label || '')] = true;
         state.regEdit.note = res.note || '';
@@ -5942,6 +5978,7 @@ var App = (function() {
       action: 'updateRegistration', srcEventId: ed.srcEventId, srcCal: ed.srcCal,
       label: ed.label || '', towns: towns, note: ed.note || '',
       households: households, banLists: banLists,
+      city: String(ed.cityText || '').trim(),   // ★市区町村（空＝消す・2026-11-26）
       assignments: members.map(function(m) { return { staffId: m.staffId, role: m.role || '' }; }),
       force: !!force
     }).then(function(res) {
@@ -6249,6 +6286,8 @@ var App = (function() {
       base: base, caseNo: caseNo, label: label, distDate: distDate,
       towns: towns, assignments: assignments, note: $('regNote').value,
       banLists: selectedBanLists(), households: z.households,
+      // ★市区町村（2026-11-26）。空欄ならサーバは今の値のまま（2日目を空欄で登録しても1日目の市区町村は消えない）
+      city: ($('regCity') ? $('regCity').value.trim() : ''),
       // ★⑦配布禁止リストを管理者が手で触ったか（総点検 2026-07-31）。
       //   同じ案件番号で2回目（複数日の2日目・増員）を登録するとき、この画面は⑦を
       //   自動おすすめへ戻している。それをそのまま保存すると、1回目に手で選んだリストが消え、
@@ -6277,6 +6316,7 @@ var App = (function() {
         $('regCaseNo').value = ''; $('regLabel').value = ''; $('regTowns').value = '';
         $('regNote').value = ''; $('regDate').value = '';
         $('regHouseholds').value = ''; updateRegHh();
+        if ($('regCity')) $('regCity').value = '';
         state.regBanSel = {}; state.regBanTouched = false; regSuggestBanLists();   // 次の案件用に自動おすすめへ戻す
         renderRegStaff(); renderRegSelected();
       } else if (res.code === 'E_CASE_CONFLICT' && res.needsConfirm) {
